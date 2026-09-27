@@ -260,7 +260,7 @@ body.presenting .draw{font-size:1.1rem;padding:21px 56px}
         <form class="add" id="addForm" autocomplete="off">
           <span class="pic-wrap"><span class="pic-btn" id="addPic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg></span><input type="file" id="addFile" accept="image/*" class="file-over" aria-label="Choose a picture for this option" title="Choose a picture"></span>
           <input id="addName" type="text" placeholder="Add a name" aria-label="Name">
-          <button class="btn" type="submit">Add</button>
+          <button class="btn" type="button" id="addBtn">Add</button>
         </form>
         <p class="hint" id="addHint" role="status"></p>
         <div class="more">
@@ -911,12 +911,15 @@ function drawPin(tb, opts, map, s){
   ctx.beginPath(); ctx.moveTo(tb.L, tb.floorY); ctx.lineTo(tb.L, tb.top + 150); ctx.arc(tb.L + 150, tb.top + 150, 150, Math.PI, Math.PI * 1.5);
   ctx.lineTo(tb.Rw - 170, tb.top); ctx.arc(tb.Rw - 170, tb.top + 170, 170, Math.PI * 1.5, Math.PI * 2); ctx.lineTo(tb.Rw, tb.floorY); ctx.closePath();
   ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fill();
-  // bins
+  // bins, each in its player's colour; once the ball lands the other bins dim and the winner's gets an orange frame
   for (let k = 0; k < tb.n; k++){
-    const x = tb.L + k * tb.binW;
-    ctx.fillStyle = k === s.win ? 'rgba(248,151,40,.55)' : (k % 2 ? 'rgba(255,255,255,.035)' : 'rgba(255,255,255,.08)');
-    ctx.fillRect(x, tb.binTop, tb.binW, tb.floorY - tb.binTop);
+    const x = tb.L + k * tb.binW, bh0 = tb.floorY - tb.binTop, o = opts[map[k]];
+    ctx.fillStyle = o ? o.color : 'rgba(255,255,255,.06)'; ctx.fillRect(x, tb.binTop, tb.binW, bh0);
+    const sh = ctx.createLinearGradient(0, tb.binTop, 0, tb.floorY); sh.addColorStop(0, 'rgba(0,0,0,.28)'); sh.addColorStop(0.35, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sh; ctx.fillRect(x, tb.binTop, tb.binW, bh0);
+    if (s.win >= 0 && s.win != null && k !== s.win){ ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x, tb.binTop, tb.binW, bh0); }
   }
+  if (s.win >= 0 && s.win != null){ const bw0 = Math.max(3, tb.binW * 0.06); ctx.strokeStyle = ORANGE; ctx.lineWidth = bw0; ctx.strokeRect(tb.L + s.win * tb.binW + bw0 / 2, tb.binTop + bw0 / 2, tb.binW - bw0, tb.floorY - tb.binTop - bw0); }
   // walls
   ctx.lineCap = 'round';
   for (const g of tb.segs){
@@ -971,7 +974,7 @@ function drawPin(tb, opts, map, s){
     const ar = clamp(Math.min(bw * 0.42, bh * 0.3), 3, 30 * UI), ay = bt + bh - ar - 6 * UI;
     avatar(o, idx, cx, ay, ar, bw >= 22 ? 1.5 * UI : 0);
     if (o.name && bw >= 15){
-      ctx.save(); ctx.fillStyle = '#F1F2F3';
+      ctx.save(); ctx.fillStyle = s.win >= 0 && s.win != null && k !== s.win ? 'rgba(241,242,243,.6)' : textOn(o.color);
       if (bw >= 74 * UI){ ctx.font = `700 ${Math.round(13 * UI)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(fit(o.name, bw - 10 * UI), cx, bt + 7 * UI); }
       else { ctx.font = `700 ${clamp(bw * 0.42, 8, 13 * UI)}px ${FONT}`; ctx.translate(cx, ay - ar - 5 * UI); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(fit(o.name, bh - 2 * ar - 16 * UI), 0, 0); }
       ctx.restore();
@@ -1083,6 +1086,37 @@ const plinko = {
 };
 
 /* ---------- 3. horse race ---------- */
+// Darken (amt < 0) or lighten (amt > 0) a hex colour
+function shade(hex, amt){ const n = parseInt(hex.slice(1), 16); const f = c => clamp(Math.round(amt < 0 ? c * (1 + amt) : c + (255 - c) * amt), 0, 255);
+  return '#' + [n >> 16, n >> 8 & 255, n & 255].map(f).map(v => v.toString(16).padStart(2, '0')).join(''); }
+// A galloping horse facing right, nose at (xNose, cy); jockey silks and saddle cloth in the person's colour, their picture as the jockey's head
+function drawHorse(xNose, cy, s, o, idx, phase){
+  const u = s / 62, hx = xNose - 34 * u, hy = cy + 2 * u, coat = '#7A4A2A', dark = '#4A2C18', hoof = '#2E1C10';
+  ctx.save(); ctx.translate(hx, hy); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const legL = 15 * u;
+  const leg = (x0, ph) => {
+    const a = Math.sin(ph) * 0.7, k = Math.max(0, Math.sin(ph + 1.3)) * 1.0;
+    const kx = x0 + Math.sin(a) * legL * 0.55, ky = 4 * u + Math.cos(a) * legL * 0.55;
+    const fx = kx + Math.sin(a - k) * legL * 0.5, fy = ky + Math.cos(a - k) * legL * 0.5;
+    ctx.strokeStyle = coat; ctx.lineWidth = Math.max(1.5, 3 * u); ctx.beginPath(); ctx.moveTo(x0, 3 * u); ctx.lineTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+    ctx.fillStyle = hoof; ctx.beginPath(); ctx.arc(fx, fy, Math.max(1, 1.6 * u), 0, TAU); ctx.fill();
+  };
+  leg(-11 * u, phase + Math.PI + 0.6); leg(15 * u, phase + 0.6); // far legs
+  ctx.strokeStyle = dark; ctx.lineWidth = 3.2 * u; ctx.beginPath(); ctx.moveTo(-19 * u, -3 * u); ctx.quadraticCurveTo(-27 * u, -3 * u + Math.sin(phase) * 2 * u, -31 * u, 6 * u); ctx.stroke();
+  ctx.fillStyle = coat; ctx.beginPath(); ctx.ellipse(0, 0, 20 * u, 8.5 * u, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(12 * u, -5 * u); ctx.lineTo(23 * u, -17 * u); ctx.lineTo(29 * u, -14 * u); ctx.lineTo(19 * u, 3 * u); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(29 * u, -15 * u, 7.5 * u, 3.8 * u, 0.45, 0, TAU); ctx.fill();
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.moveTo(12 * u, -7 * u); ctx.lineTo(22.5 * u, -18.5 * u); ctx.lineTo(20.5 * u, -20 * u); ctx.lineTo(10.5 * u, -8.5 * u); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(24 * u, -19 * u); ctx.lineTo(25.5 * u, -23.5 * u); ctx.lineTo(27.5 * u, -19 * u); ctx.closePath(); ctx.fill();
+  leg(-15 * u, phase + Math.PI); leg(12 * u, phase); // near legs
+  // saddle cloth and jockey in the person's colour
+  ctx.fillStyle = shade(o.color, -0.15); rr(-7 * u, -9 * u, 14 * u, 9 * u, 2 * u); ctx.fill();
+  ctx.save(); ctx.translate(3 * u, -14 * u); ctx.rotate(-0.6); ctx.fillStyle = o.color; rr(-6 * u, -4.2 * u, 14 * u, 8.4 * u, 3.5 * u); ctx.fill(); ctx.restore();
+  ctx.strokeStyle = o.color; ctx.lineWidth = 3 * u; ctx.beginPath(); ctx.moveTo(7 * u, -17 * u); ctx.lineTo(16 * u, -11 * u); ctx.stroke();
+  ctx.strokeStyle = shade(o.color, -0.35); ctx.lineWidth = 3.2 * u; ctx.beginPath(); ctx.moveTo(0, -11 * u); ctx.lineTo(5 * u, -5 * u); ctx.stroke();
+  ctx.restore();
+  avatar(o, idx, hx + 12 * u, hy - 24 * u, 6.8 * u, Math.max(1, 1.1 * u));
+}
 function raceGeo(n){
   const laneH = Math.min(62 * UI, (H - 24 * UI) / n), top = (H - laneH * n) / 2;
   const gateW = clamp(W * 0.24, 76 * UI, 160 * UI);
@@ -1117,10 +1151,7 @@ function drawRace(opts, prog, bob, win, fx){
     const o = opts[i], cy = g.top + i * g.laneH + g.laneH / 2 + (bob[i] || 0);
     const s = clamp(g.laneH * 0.95, 12, 58 * UI);
     const x = lerp(g.startX + s, g.finishX, prog[i]);
-    ctx.save(); ctx.translate(x - s / 2, cy); ctx.scale(-1, 1);
-    ctx.font = `${Math.round(s * 0.85)}px ${EMOJI}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('🏇', 0, 0); ctx.restore();
-    avatar(o, i, x - s * 0.62, cy - s * 0.04, clamp(s * 0.24, 3, 15 * UI), 1.5 * UI);
+    drawHorse(x, cy + s * 0.08, s * 1.32, o, i, prog[i] * 64 + i * 1.3);
   }
   if (fx){
     if (fx.flash > 0){ ctx.fillStyle = `rgba(255,255,255,${fx.flash * 0.75})`; ctx.fillRect(0, 0, W, H); }
@@ -1135,29 +1166,58 @@ const race = {
   label: 'Horse race', icon: '🏇', via: 'First past the post',
   idle(opts){ drawRace(opts, opts.map(() => 0), [], -1); },
   async run(opts, w){
-    const n = opts.length, T = 6200 * SPEED;
+    const n = opts.length, T = 5400 * SPEED, POST = 700 * SPEED;
     const rival = n > 1 ? [...Array(n).keys()].filter(i => i !== w)[randInt(n - 1)] : -1;
     // Race shape: 45% come-from-behind, 20% wire-to-wire with a late charge, 35% open.
     // Come-from-behind races usually (80%) end in a photo finish; the others do 40% of the time.
     const sr = rand(), scen = rival < 0 ? 'open' : sr < 0.45 ? 'comeback' : sr < 0.65 ? 'wire' : 'open';
     const close = rival >= 0 && rand() < (scen === 'comeback' ? 0.8 : 0.4);
-    const fin = opts.map((_, i) => i === w ? T : i === rival ? T * (close ? 1.004 + rand() * 0.012 : 1.025 + rand() * 0.05) : T * (1.035 + rand() * 0.2));
-    const tight = i => scen !== 'open' && (i === w || i === rival);
-    const A = opts.map((_, i) => tight(i) ? 0.02 : 0.03 + rand() * 0.03), K = opts.map(() => 0.6 + rand() * 0.6), PH = opts.map(() => rand() * TAU);
-    const bias = opts.map((_, i) => {
-      if (scen === 'open') return (rand() * 2 - 1) * 0.04;
-      if (scen === 'comeback') return i === w ? -(0.04 + rand() * 0.03) : i === rival ? 0.04 + rand() * 0.02 : 0;
-      return i === w ? 0.04 + rand() * 0.02 : i === rival ? -(0.02 + rand() * 0.02) : 0;
-    });
+    // One candidate race: each horse has two pace wobbles (slow surges and quicker spurts) on top of the race shape.
+    // Progress never goes backwards, and nobody but the winner can reach the line before time T.
+    const makeRace = () => {
+      const fin = opts.map((_, i) => i === w ? T : i === rival ? T * (close ? 1.004 + rand() * 0.012 : 1.025 + rand() * 0.05) : T * (1.035 + rand() * 0.2));
+      const tight = i => scen !== 'open' && (i === w || i === rival);
+      const A1 = opts.map((_, i) => tight(i) ? 0.018 : 0.022 + rand() * 0.02), K1 = opts.map(() => 0.8 + rand() * 0.9), P1 = opts.map(() => rand() * TAU);
+      const A2 = opts.map(() => 0.008 + rand() * 0.01), K2 = opts.map(() => 2.2 + rand() * 1.6), P2 = opts.map(() => rand() * TAU);
+      const bias = opts.map((_, i) => {
+        if (scen === 'open') return (rand() * 2 - 1) * 0.04;
+        if (scen === 'comeback') return i === w ? -(0.04 + rand() * 0.03) : i === rival ? 0.04 + rand() * 0.02 : 0;
+        return i === w ? 0.04 + rand() * 0.02 : i === rival ? -(0.02 + rand() * 0.02) : 0;
+      });
+      const raw = (i, ms) => { const u = ms / fin[i]; if (u >= 1) return Math.min(1 + (u - 1) * 0.9, 1.06); return u + 4 * u * (1 - u) * (A1[i] * Math.sin(TAU * K1[i] * u + P1[i]) + A2[i] * Math.sin(TAU * K2[i] * u + P2[i])) + bias[i] * Math.sin(Math.PI * u); };
+      // sampled once, made monotonic, then read back with interpolation
+      const S = 360, dur = T + POST, tab = opts.map(() => new Float32Array(S + 1));
+      for (let i = 0; i < n; i++){ let mx = 0; for (let k = 0; k <= S; k++){ mx = Math.max(mx, raw(i, dur * k / S)); tab[i][k] = mx; } }
+      const at = ms => { const kf = clamp(ms / dur, 0, 1) * S, k = Math.min(S - 1, Math.floor(kf)), f = kf - k; return tab.map(t => t[k] + (t[k + 1] - t[k]) * f); };
+      return { at };
+    };
+    // How much the order changes (pairs swapping places, with a small margin so a dead heat doesn't count over and over),
+    // plus a bonus for a close second at the line.
+    const score = rc => {
+      const sign = new Int8Array(n * n); let flips = 0;
+      for (let k = 1; k <= 150; k++){
+        const p = rc.at(T * (0.06 + 0.94 * k / 150));
+        for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++){
+          const d = p[i] - p[j], sg = d > 0.004 ? 1 : d < -0.004 ? -1 : 0, key = i * n + j;
+          if (sg && sign[key] && sg !== sign[key]) flips++;
+          if (sg) sign[key] = sg;
+        }
+      }
+      const pT = rc.at(T); let second = 0; for (let i = 0; i < n; i++) if (i !== w) second = Math.max(second, pT[i]);
+      const lateOvertake = scen === 'comeback' ? (rc.at(0.8 * T).some((v, i) => i !== w && v > rc.at(0.8 * T)[w]) ? 1 : 0) : 1;
+      return flips + 30 * Math.max(0, second - 0.95) + (lateOvertake ? 0 : -50);
+    };
+    let best = null, bestS = -Infinity;
+    for (let c = 0; c < 40; c++){ const rc = makeRace(), sc = score(rc); if (sc > bestS){ bestS = sc; best = rc; } }
+    const progAt = best.at;
     let prog = opts.map(() => 0), nextHoof = 0, finished = false;
-    const progAt = ms => fin.map((f, i) => { const u = ms / f; if (u >= 1) return Math.min(1 + (u - 1) * 0.9, 1.06); return u + A[i] * 4 * u * (1 - u) * Math.sin(TAU * K[i] * u + PH[i]) + bias[i] * Math.sin(Math.PI * u); });
     // slow motion only if it's close: someone else ahead of, or within ~2.5% of, the winner on the final stretch
     let closeRun = false;
     for (let ms = 0.86 * T; ms <= T && !closeRun; ms += T / 240){ const p = progAt(ms); for (let i = 0; i < n; i++) if (i !== w && p[i] > p[w] - 0.025){ closeRun = true; break; } }
-    const slow = closeRun ? ms => 1 - 0.5 * ramp(ms, 0.84 * T, 0.94 * T) + 0.5 * ramp(ms, T + 200, T + 600) : () => 1;
+    const slow = closeRun ? ms => 1 - 0.5 * ramp(ms, 0.84 * T, 0.94 * T) + 0.5 * ramp(ms, T + 120, T + 420) : () => 1;
     const photo = close;
     Sound.startBell();
-    await animateWarp(T + 1500 * SPEED, slow, (t, ms) => {
+    await animateWarp(T + POST, slow, (t, ms) => {
       if (ms < T && ms >= nextHoof){ Sound.hoof(); nextHoof = ms + (75 + Math.random() * 60) * (ms > 0.8 * T ? 0.6 : 1); }
       if (ms >= T && !finished){ finished = true; Sound.bell(); }
       prog = progAt(ms);
@@ -2737,7 +2797,7 @@ async function draw(){
   try { res = await METHODS[m].run(opts, w); } catch (e) { console.error(e); }
   if (res && typeof res.w === 'number') w = res.w;
   Sound.cheer();
-  await wait(REDUCED ? 150 : 600);
+  await wait(REDUCED ? 150 : 350);
   busy = false; current = { opt: opts[w], method: m, left: opts.length, via: res && res.via };
   showResult(); updateUI();
 }
@@ -2793,7 +2853,7 @@ function renderChips(){
 function applyLocks(){
   const panel = document.querySelector('.panel'); if (!panel) return;
   panel.classList.toggle('locked', busy);
-  panel.querySelectorAll('.del, button.linkish, .file-over, #addForm button[type=submit], #pasteAdd').forEach(el => {
+  panel.querySelectorAll('.del, button.linkish, .file-over, #addBtn, #pasteAdd').forEach(el => {
     el.disabled = busy;
     if (busy) el.title = 'Available when this draw finishes'; else if (el.title === 'Available when this draw finishes') el.removeAttribute('title');
   });
@@ -2822,7 +2882,7 @@ function silhouetteSVG(bg){
 function thumbEl(o, i, cls){
   let el;
   if (o.img){ el = document.createElement('img'); el.src = o.img; el.alt = ''; }
-  else { el = document.createElement('span'); el.innerHTML = silhouetteSVG(o.color); el.style.display = 'block'; el.style.width = el.style.height = '100%'; }
+  else { el = document.createElement('span'); el.innerHTML = silhouetteSVG(o.color); if (!cls){ el.style.display = 'block'; el.style.width = el.style.height = '100%'; } }
   if (cls){ el.className = cls; el.style.background = o.color; el.style.color = textOn(o.color); }
   return el;
 }
@@ -2878,13 +2938,20 @@ function setPending(url){
   if (url){ b.innerHTML = ''; const im = document.createElement('img'); im.src = url; im.alt = ''; b.appendChild(im); b.setAttribute('aria-label', 'Change the chosen picture'); }
   else { b.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>'; b.setAttribute('aria-label', 'Choose a picture for this option'); }
 }
-$('#addForm').addEventListener('submit', async e => {
-  e.preventDefault();
+// Add is handled directly (not by form submission), because sandboxed viewers such as Claude's block form submits
+$('#addForm').addEventListener('submit', e => e.preventDefault());
+$('#addBtn').onclick = () => doAdd();
+$('#addName').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing){ e.preventDefault(); doAdd(); } });
+let adding = false;
+async function doAdd(){
+  if (adding || busy) return; adding = true;
+  try {
   const name = $('#addName').value.trim();
   if (!name && !pendingImg){ hint('Type a name or choose a picture first.'); $('#addName').focus(); return; }
   const newOpt = makeOption(name, pendingImg); await colourFromPicture(newOpt);
   if (addOptions([newOpt])){ $('#addName').value = ''; setPending(null); hint(''); $('#addName').focus(); }
-});
+  } finally { adding = false; }
+}
 $('#addFile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { setPending(await readImage(f)); $('#addName').focus(); } catch { hint('That file could not be opened as a picture.'); } };
 async function addPictureFiles(files){
   files = files.filter(f => f.type.startsWith('image/')); if (!files.length) return; const out = [];
