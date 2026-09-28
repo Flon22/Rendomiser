@@ -90,7 +90,20 @@ body.presenting .about{display:none}
 .switch input:checked + .track::after{transform:translateX(18px);background:#000}
 .switch input:focus-visible + .track{outline:2px solid var(--focus);outline-offset:2px}
 
-.stage-wrap{position:relative;height:clamp(320px,calc(100vh - 262px),1600px);border-radius:0;overflow:hidden;border:none;border-top:4px solid var(--brass);background:#1E2126;margin-top:18px}
+.stage-wrap{position:relative;height:clamp(320px,calc(100vh - 262px),1600px);border-radius:0;overflow:hidden;border:none;border-top:4px solid var(--brass);margin-top:18px;
+  /* static backdrop: orange corner marks, grid, soft spotlight (painted once by the browser, not by the games every frame) */
+  --cm:linear-gradient(rgba(248,151,40,.55),rgba(248,151,40,.55));
+  background:
+    var(--cm) left 14px top 13px/16px 2px no-repeat, var(--cm) left 13px top 14px/2px 16px no-repeat,
+    var(--cm) right 14px top 13px/16px 2px no-repeat, var(--cm) right 13px top 14px/2px 16px no-repeat,
+    var(--cm) left 14px bottom 13px/16px 2px no-repeat, var(--cm) left 13px bottom 14px/2px 16px no-repeat,
+    var(--cm) right 14px bottom 13px/16px 2px no-repeat, var(--cm) right 13px bottom 14px/2px 16px no-repeat,
+    linear-gradient(to right, rgba(255,255,255,.045) 1px, transparent 1px) center/120px 120px,
+    linear-gradient(to bottom, rgba(255,255,255,.045) 1px, transparent 1px) center/120px 120px,
+    linear-gradient(to right, rgba(255,255,255,.03) 1px, transparent 1px) center/24px 24px,
+    linear-gradient(to bottom, rgba(255,255,255,.03) 1px, transparent 1px) center/24px 24px,
+    radial-gradient(circle farthest-corner at 50% 42%, #3A3F46 0%, #16181B 122%);
+  background-color:#16181B}
 @media (max-width:880px){.stage-wrap{height:clamp(300px,55vh,480px)}}
 #stage{display:block;width:100%;height:100%}
 
@@ -570,13 +583,37 @@ function readImage(file){
 const canvas = $('#stage'), wrap = $('#stageWrap');
 let ctx = canvas.getContext('2d');
 let W = 1, H = 1, UI = 1; // UI: text and on-screen furniture scale with the stage (1 at ~820x520)
+// Canvas resolution: the screen's pixel density, but within a pixel budget (about 1080p at 1.3x), and scaled down
+// automatically (QUALITY) if frames run slow. Painting pixels is by far the biggest cost on slower machines.
+const PIXEL_BUDGET = 3.4e6;
+let QUALITY = 1, DPR = 1;
+function applyResolution(){
+  const base = Math.min(window.devicePixelRatio || 1, 2), budget = Math.sqrt(PIXEL_BUDGET / Math.max(1, W * H));
+  DPR = Math.max(0.6, Math.min(base, budget) * QUALITY);
+  const cw = Math.round(W * DPR), ch = Math.round(H * DPR);
+  if (canvas.width !== cw || canvas.height !== ch){ canvas.width = cw; canvas.height = ch; }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+// Watches frame times during animations: if a run of 30 frames averages slower than ~42 fps, drop the resolution a notch.
+// At the start of each draw it steps back up a notch if the previous draw ran smoothly.
+const perf = { n: 0, sum: 0, dropped: false };
+function noteFrame(dt){
+  if (!(dt > 0 && dt < 250)) return;
+  perf.sum += dt; perf.n++;
+  if (perf.n >= 30){
+    const avg = perf.sum / perf.n; perf.sum = 0; perf.n = 0;
+    if (avg > 24 && QUALITY > 0.55){ QUALITY = Math.max(0.5, QUALITY * 0.8); perf.dropped = true; applyResolution(); }
+  }
+}
+function drawStartQuality(){
+  if (!perf.dropped && QUALITY < 1){ QUALITY = Math.min(1, QUALITY / 0.8); applyResolution(); }
+  perf.dropped = false; perf.n = 0; perf.sum = 0;
+}
 function resize(){
   const r = wrap.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   W = Math.max(1, r.width); H = Math.max(1, r.height);
   UI = clamp(Math.min(W / 820, H / 520), 1, 3); wrap.style.setProperty('--ui', UI.toFixed(3));
-  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  applyResolution();
   if (!busy) renderStage();
 }
 // Like animate(), but playback speed can vary: factor(simMs) < 1 gives slow motion.
@@ -585,6 +622,7 @@ function animateWarp(duration, factor, frame){
     let last = null, st = 0;
     const step = now => {
       if (last === null) last = now;
+      noteFrame(now - last);
       const dt = Math.min(50, Math.max(0, now - last)); last = now;
       st = Math.min(duration, st + dt * clamp(factor(st), 0.05, 4));
       frame(st / duration, st);
@@ -600,8 +638,9 @@ const lerpXY = (A, B, u) => B ? [A[0] + (B[0] - A[0]) * u, A[1] + (B[1] - A[1]) 
 const ramp = (x, a, b) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 function animate(duration, frame){
   return new Promise(res => {
-    const t0 = performance.now();
+    const t0 = performance.now(); let prev = null;
     const step = now => {
+      if (prev !== null) noteFrame(now - prev); prev = now;
       const ms = Math.max(0, now - t0), t = Math.min(1, ms / duration);
       frame(t, ms);
       if (t < 1) requestAnimationFrame(step); else res();
@@ -609,17 +648,8 @@ function animate(duration, frame){
     requestAnimationFrame(step);
   });
 }
-function felt(){
-  const g = ctx.createRadialGradient(W / 2, H * 0.42, 10, W / 2, H / 2, Math.max(W, H) * 0.75);
-  g.addColorStop(0, '#3A3F46'); g.addColorStop(1, '#16181B');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  ctx.save(); ctx.lineWidth = 1;
-  for (let x = (W / 2) % 24, k = 0; x < W; x += 24){ const major = Math.abs(x - W / 2) % 120 < 1; ctx.strokeStyle = major ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.03)'; ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, 0); ctx.lineTo(Math.round(x) + 0.5, H); ctx.stroke(); }
-  for (let y = (H / 2) % 24; y < H; y += 24){ const major = Math.abs(y - H / 2) % 120 < 1; ctx.strokeStyle = major ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.03)'; ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(W, Math.round(y) + 0.5); ctx.stroke(); }
-  ctx.strokeStyle = 'rgba(248,151,40,.55)'; ctx.lineWidth = 2; const m = 14, L = 16;
-  [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y + sy * L); ctx.lineTo(x, y); ctx.lineTo(x + sx * L, y); ctx.stroke(); });
-  ctx.restore();
-}
+// The backdrop is drawn by the page's styling behind the canvas, so each frame only needs a clear canvas.
+function felt(){ ctx.clearRect(0, 0, W, H); }
 function rr(x, y, w, h, r){
   r = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath(); ctx.moveTo(x + r, y);
@@ -1934,7 +1964,7 @@ async function draw(){
   lastMethod = m;
   const revealGame = state.mix;
   const opts = state.options.slice(); let w = randInt(opts.length);
-  busy = true; updateUI();
+  busy = true; updateUI(); drawStartQuality();
   if (revealGame){ // reveal which game it is before it starts
     Sound.whoosh();
     await animate(1150 * SPEED, t => drawMystery(easeOutCubic(Math.min(1, t / 0.55)), m));
@@ -2279,6 +2309,16 @@ checkShareHash();
 window.addEventListener('hashchange', checkShareHash);
 
 renderChips(); renderList(); updateUI();
+if (/[?&]fps\b/.test(location.search)){
+  const box = document.createElement('div');
+  box.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;background:rgba(0,0,0,.75);color:#F89728;font:700 12px/1.3 ui-monospace,Menlo,monospace;padding:6px 8px;pointer-events:none';
+  document.body.appendChild(box);
+  let last = performance.now(), frames = 0, acc = 0, worst = 0;
+  const loop = now => { const d = now - last; last = now; frames++; acc += d; worst = Math.max(worst, d);
+    if (acc >= 500){ box.textContent = `${Math.round(frames * 1000 / acc)} fps | worst ${Math.round(worst)} ms | canvas ${canvas.width}x${canvas.height} (x${DPR.toFixed(2)}, quality ${Math.round(QUALITY * 100)}%)`; frames = 0; acc = 0; worst = 0; }
+    requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
 (async () => {
   const todo = [...state.options, ...state.drawn].filter(o => o.img && !o.imgColor);
   if (!todo.length) return;
