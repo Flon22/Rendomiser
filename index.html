@@ -836,7 +836,7 @@ function drawWheel(opts, rot, win){
   ctx.fillStyle = '#FFFFFF'; ctx.fill(); ctx.lineWidth = 3 * u; ctx.strokeStyle = GRAPHITE; ctx.stroke();
 }
 const wheel = {
-  label: 'Wheel', icon: '🎡', via: 'The wheel stopped on', rules: 'The wheel spins and slows down: whoever it stops on is picked.',
+  label: 'Wheel', icon: '🎡', via: 'The wheel stopped on', rules: 'Where the wheel stops decides the winner.',
   idle(opts){ drawWheel(opts, wheelRot, -1); },
   async run(opts, w){
     const n = opts.length, a = TAU / n;
@@ -1078,7 +1078,7 @@ function drawPin(tb, opts, map, s){
 }
 const PIN_POINTS = { bumper: 1000, sling: 500, spinner: 250, peg: 100 };
 const plinko = {
-  label: 'Pinball', icon: '🕹️', via: 'The ball dropped into', rules: 'The ball bounces down the table: whoever’s bin it lands in is picked.',
+  label: 'Pinball', icon: '🕹️', via: 'The ball dropped into', rules: 'Where the ball lands decides the winner.',
   idle(opts){
     const tb = pinTable(opts.length, H / W), map = opts.map((_, i) => i);
     drawPin(tb, opts, map, { ball: [(tb.laneX + tb.Rw) / 2, tb.plungerY - tb.ballR - 0.5], score: 0 });
@@ -1261,7 +1261,7 @@ function drawRace(opts, prog, bob, win, fx){
   }
 }
 const race = {
-  label: 'Horse race', icon: '🏇', via: 'First past the post', rules: 'Everyone gets a horse: first past the post is picked.',
+  label: 'Horse race', icon: '🏇', via: 'First past the post', rules: 'First to the finish line wins.',
   idle(opts){ drawRace(opts, opts.map(() => 0), [], -1); },
   async run(opts, w){
     const n = opts.length, T = 5400 * SPEED, POST = 700 * SPEED;
@@ -1836,7 +1836,7 @@ function drawRaceScene(tr, opts, lab, F, fi, camY, flash, finishFrames, winMarbl
   ctx.fillStyle = ORANGE; ctx.fillRect(bx - 7 * u, by1 - 1 * u, 14 * u, 3 * u);
 }
 const marbleRace = {
-  label: 'Marble race', icon: '🏁', via: 'First across the line', rules: 'Everyone gets a marble: first across the finish line is picked.',
+  label: 'Marble race', icon: '🏁', via: 'First across the line', rules: 'First to the finish line wins.',
   idle(opts){
     const n = opts.length;
     if (!raceIdle || raceIdle.n !== n) raceIdle = { n, tr: raceTrackBuild(n, mulberry(n * 7 + 1)) };
@@ -1991,7 +1991,7 @@ function drawBattleScene(opts, lab, d){
   }
 }
 const marbleBattle = {
-  label: 'Spinning tops', icon: '🌀', via: 'Last top spinning', rules: 'Last top spinning wins: knock the others out of the ring!',
+  label: 'Spinning tops', icon: '🌀', via: 'Last top spinning', rules: 'Last spinning top standing wins.',
   idle(opts){
     const n = opts.length, d = battleDims(n), f = new Float32Array(n * 3);
     for (let m = 0; m < n; m++){ const a = m * 2.39996, rad = d.R0 * 0.62 * Math.sqrt((m + 0.5) / n); f[m * 3] = Math.cos(a) * rad; f[m * 3 + 1] = Math.sin(a) * rad; }
@@ -2076,7 +2076,13 @@ function drawMystery(scale, reveal){
     ctx.globalAlpha = Math.min(1, k * 1.6);
     ctx.font = `${Math.round(s * 0.2 * (0.7 + 0.3 * k))}px ${EMOJI}`; ctx.fillText(m.icon, W / 2, H / 2 - s * 0.1);
     ctx.fillStyle = '#F2F2F2'; ctx.font = `800 ${Math.round(clamp(s * 0.09, 22, 52 * UI))}px ${DISPLAY}`; ctx.fillText(m.label, W / 2, H / 2 + s * 0.1);
-    ctx.fillStyle = ORANGE; ctx.fillRect(W / 2 - 40 * UI, H / 2 + s * 0.1 + clamp(s * 0.09, 22, 52 * UI) * 0.75, 80 * UI, 4 * UI);
+    const ty = H / 2 + s * 0.1 + clamp(s * 0.09, 22, 52 * UI) * 0.75;
+    ctx.fillStyle = ORANGE; ctx.fillRect(W / 2 - 40 * UI, ty, 80 * UI, 4 * UI);
+    if (m.rules){ // the rules, faded in just after the name
+      const rf = Math.round(clamp(s * 0.036, 14, 22 * UI));
+      ctx.globalAlpha = clamp((k - 0.35) / 0.4, 0, 1);
+      ctx.fillStyle = 'rgba(242,242,242,.85)'; ctx.font = `600 ${rf}px ${FONT}`; ctx.fillText(fit(m.rules, W - 40 * UI), W / 2, ty + rf * 2.1);
+    }
   } else {
     const pulse = 1 + 0.04 * Math.sin((scale || 0) * 3);
     ctx.fillStyle = ORANGE; ctx.font = `800 ${Math.round(s * 0.34 * pulse)}px ${DISPLAY}`; ctx.fillText('?', W / 2, H / 2 + s * 0.02);
@@ -2159,13 +2165,12 @@ async function draw(){
   let m = state.method;
   if (state.mix){ const keys = Object.keys(METHODS).filter(k => k !== lastMethod); m = keys[randInt(keys.length)]; }
   lastMethod = m;
-  const revealGame = state.mix;
-  showRules(METHODS[m].rules);
+  const revealGame = true;
   const opts = active().slice(); let w = randInt(opts.length);
   busy = true; updateUI(); drawStartQuality();
-  if (revealGame){ // reveal which game it is before it starts
+  if (revealGame){ // title card: which game it is and its one-line rules, long enough to read before it starts
     Sound.whoosh();
-    await animate(1150 * SPEED, t => drawMystery(easeOutCubic(Math.min(1, t / 0.55)), m));
+    await animate(2600 * SPEED, t => drawMystery(easeOutCubic(Math.min(1, t / 0.35)), m));
   }
   let res = null;
   try { res = await METHODS[m].run(opts, w); } catch (e) { console.error(e); }
